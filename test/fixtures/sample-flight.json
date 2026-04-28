@@ -1,0 +1,70 @@
+{
+  "id": "flight-vn205",
+  "airline": "VN",
+  "systemName": "VietnamAirlines",
+  "source": "VN",
+  "typeOfBook": "NN",
+  "isNDC": false,
+  "from": "HAN",
+  "to": "SGN",
+  "departDateTime": "2026-04-25T05:00:00",
+  "arrivalDateTime": "2026-04-25T07:10:00",
+  "routeInfo": [
+    {
+      "from": "HAN",
+      "to": "SGN",
+      "carrierCode": "VN",
+      "flightNumber": "205",
+      "departDate": "25-04-2026 05:00",
+      "arrivalDate": "25-04-2026 07:10",
+      "airCraft": "321",
+      "flightTime": 130
+    }
+  ],
+  "priceInfo": [
+    {
+      "id": "fare-001",
+      "class": "E",
+      "source": "VN",
+      "currencyCode": "VND",
+      "fareADT": 1500000,
+      "taxADT": 280000,
+      "vatADT": 120000,
+      "issueFeeADT": 0,
+      "fareCHD": 1125000,
+      "taxCHD": 280000,
+      "vatCHD": 120000,
+      "fareINF": 300000,
+      "taxINF": 0,
+      "vatINF": 0,
+      "seatAvailable": 9,
+      "soldOut": false,
+      "fareInfo": [
+        {
+          "market": "HANSGN",
+          "fareBasis": "ECOECO",
+          "cabinClass": "Economy"
+        }
+      ]
+    },
+    {
+      "id": "fare-002",
+      "class": "Y",
+      "source": "VN",
+      "currencyCode": "VND",
+      "fareADT": 2500000,
+      "taxADT": 280000,
+      "vatADT": 120000,
+      "issueFeeADT": 0,
+      "seatAvailable": 4,
+      "soldOut": false,
+      "fareInfo": [
+        {
+          "market": "HANSGN",
+          "fareBasis": "YFLEX",
+          "cabinClass": "Economy"
+        }
+      ]
+    }
+  ]
+}

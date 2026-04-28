@@ -1,0 +1,43 @@
+# Credentials - TUYỆT ĐỐI KHÔNG COMMIT
+.env
+.env.local
+.env.*.local
+
+# Session/cookies
+session/
+storage-state.json
+
+# Screenshots (có thể chứa thông tin nhạy cảm)
+screenshots/
+debug/
+
+# Local assistant/tooling state
+.claude/
+.kilo/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Test coverage
+coverage/
+playwright-report/
+test-results/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+venv/

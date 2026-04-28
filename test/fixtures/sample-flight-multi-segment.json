@@ -1,0 +1,60 @@
+{
+  "id": "flight-vj851",
+  "airline": "VJ",
+  "systemName": "VietJet",
+  "source": "VJ",
+  "typeOfBook": "NN",
+  "isNDC": false,
+  "from": "HAN",
+  "to": "SGN",
+  "departDateTime": "2026-04-25T06:00:00",
+  "arrivalDateTime": "2026-04-25T10:30:00",
+  "routeInfo": [
+    {
+      "from": "HAN",
+      "to": "DAD",
+      "carrierCode": "VJ",
+      "flightNumber": "851",
+      "departDate": "25-04-2026 06:00",
+      "arrivalDate": "25-04-2026 07:30",
+      "airCraft": "320",
+      "flightTime": 90
+    },
+    {
+      "from": "DAD",
+      "to": "SGN",
+      "carrierCode": "VJ",
+      "flightNumber": "852",
+      "departDate": "25-04-2026 08:30",
+      "arrivalDate": "25-04-2026 10:30",
+      "airCraft": "320",
+      "flightTime": 120
+    }
+  ],
+  "priceInfo": [
+    {
+      "id": "fare-vj001",
+      "class": "V",
+      "source": "VJ",
+      "currencyCode": "VND",
+      "fareADT": 1200000,
+      "taxADT": 250000,
+      "vatADT": 100000,
+      "issueFeeADT": 0,
+      "seatAvailable": 5,
+      "soldOut": false,
+      "fareInfo": [
+        {
+          "market": "HANDAD",
+          "fareBasis": "VECO",
+          "cabinClass": "Economy"
+        },
+        {
+          "market": "DADSGN",
+          "fareBasis": "VECO",
+          "cabinClass": "Economy"
+        }
+      ]
+    }
+  ]
+}

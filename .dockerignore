@@ -1,0 +1,15 @@
+.git
+.claude
+.env
+.env.local
+.env.*.local
+coverage
+debug
+node_modules
+npm-debug.log*
+screenshots
+session
+storage-state.json
+playwright-report
+test-results
+*.log

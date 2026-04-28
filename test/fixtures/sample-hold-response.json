@@ -1,0 +1,17 @@
+{
+  "success": true,
+  "data": {
+    "sessionID": 12345,
+    "listPNR": [
+      {
+        "airline": "VN",
+        "pnr": "ABC123",
+        "status": "OK",
+        "dep": "HAN",
+        "ret": "SGN",
+        "timelimit": "26-04-2026 23:59",
+        "message": "ABC123"
+      }
+    ]
+  }
+}

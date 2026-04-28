@@ -1,0 +1,17 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "https://booking.namthanh.vn",
+      "localStorage": [
+        { "name": "accessToken", "value": "fake-access-token-abc123" },
+        { "name": "refreshToken", "value": "fake-refresh-token-xyz789" },
+        { "name": "diff", "value": "0" },
+        { "name": "i18nextLng", "value": "vi" },
+        { "name": "userInfo", "value": "{\"email\":\"test@example.com\",\"dienThoai\":\"0901234567\"}" },
+        { "name": "agentInfo", "value": "{\"agentEmail\":\"agent@example.com\",\"telephone\":\"0987654321\"}" },
+        { "name": "additionalFees", "value": "{\"ADT\":50000,\"CHD\":50000,\"INF\":0}" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "name": "namthanh-auto-login",
+  "version": "1.0.0",
+  "description": "Auto-login to booking.namthanh.vn using Playwright + ddddocr",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "booking": "node src/booking-cli.js",
+    "api": "node src/server.js",
+    "backend": "node src/server.js",
+    "login": "node src/booking-cli.js login",
+    "journey": "node src/booking-cli.js journey",
+    "price": "node src/booking-cli.js price",
+    "hold": "node src/booking-cli.js hold",
+    "airports": "node src/booking-cli.js airports",
+    "ocr": "python ocr_server.py 8001",
+    "debug": "node src/index.js --debug",
+    "inspect": "node scripts/dev/inspect-login-page.js",
+    "inspect-search": "node scripts/dev/inspect-search-form.js",
+    "check-tokens": "node scripts/dev/check-token-storage.js",
+    "detect-captcha": "node scripts/dev/detect-captcha-type.js",
+    "search-test": "node scripts/dev/search-test.js",
+    "search-debug": "node scripts/dev/search-debug.js",
+    "test-ocr": "node scripts/dev/test-ocr.js",
+    "probe-refresh": "node scripts/dev/probe-refresh.js",
+    "intercept": "node scripts/dev/intercept-network.js",
+    "test": "jest",
+    "test:coverage": "jest --coverage",
+    "test:watch": "jest --watch"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.4.5",
+    "playwright": "^1.45.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}
