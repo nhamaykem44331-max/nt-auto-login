@@ -43,6 +43,7 @@ const {
   selectFlightPair,
   buildAncillariesRequest,
   buildBookRequest,
+  clearSessionListCache,
   refreshBookRequestLuggage,
   summarizeHoldResult,
   segmentsOf,
@@ -700,6 +701,7 @@ describe('cheapestFare with bookingFee array', () => {
 describe('searchJourney', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    clearSessionListCache();
     mockClient.createSession.mockResolvedValue({
       data: { sessionID: 42, listSignIn: [{ airline: 'VN' }] },
     });
@@ -721,6 +723,24 @@ describe('searchJourney', () => {
     const result = await searchJourney({ from: 'HAN', to: 'SGN', date: '25-04-2026' }, { client: mockClient });
     expect(mockClient.searchFlightByAirline).toHaveBeenCalledTimes(5);
     expect(result.flights).toHaveLength(0);
+  });
+
+  it('uses cached route sign-ins on repeated searches', async () => {
+    mockClient.createSession
+      .mockResolvedValueOnce({
+        data: { sessionID: 101, listSignIn: [{ airline: 'VN' }, { airline: 'VJ' }] },
+      })
+      .mockResolvedValueOnce({
+        data: { sessionID: 102, listSignIn: [] },
+      });
+    mockClient.searchFlightByAirline.mockResolvedValue({ data: { departureFlight: [] } });
+
+    await searchJourney({ from: 'HAN', to: 'CAN', date: '25-04-2026' }, { client: mockClient });
+    const result = await searchJourney({ from: 'HAN', to: 'CAN', date: '26-04-2026' }, { client: mockClient });
+
+    expect(mockClient.createSession.mock.calls[1][0].airlines).toEqual(['VN', 'VJ']);
+    expect(mockClient.searchFlightByAirline).toHaveBeenCalledTimes(4);
+    expect(result.signIns).toEqual(['VN', 'VJ']);
   });
 
   it('starts airline searches in parallel', async () => {

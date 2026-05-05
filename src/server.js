@@ -20,8 +20,11 @@ const ocrClient = require('./ddddocr-client');
 const {
   buildAncillariesRequest,
   buildBookRequest,
+  buildSearchRequest,
   cheapestFare,
   createBookingWithProtection,
+  flightsFromSearchResponse,
+  flightsFromSearchResponseRT,
   hasCompletePnrResponse,
   holdFlight,
   isBookingProtectionError,
@@ -69,6 +72,13 @@ const idempotencyCache = new Map();
 const ancillaryCache = new Map();
 const inflightAncillaries = new Map();
 const inflightSearch = new Map();
+const searchResponseCache = new Map();
+const SEARCH_RESPONSE_CACHE_TTL_SECONDS = Number.parseInt(process.env.SEARCH_RESPONSE_CACHE_TTL_SECONDS || '90', 10);
+const SEARCH_RESPONSE_CACHE_TTL_MS = (
+  Number.isFinite(SEARCH_RESPONSE_CACHE_TTL_SECONDS) && SEARCH_RESPONSE_CACHE_TTL_SECONDS > 0
+    ? SEARCH_RESPONSE_CACHE_TTL_SECONDS
+    : 90
+) * 1000;
 
 const EXCHANGE_RATE_TTL_MS = Number.parseInt(process.env.EXCHANGE_RATE_TTL_SECONDS || '300', 10) * 1000;
 const EXCHANGE_RATE_FALLBACK = Number.parseFloat(process.env.EXCHANGE_RATE_FALLBACK || '26357') || 26357;
@@ -351,6 +361,9 @@ function cleanCaches() {
   }
   for (const [key, item] of ancillaryCache.entries()) {
     if (!item || item.expiresAt <= now) ancillaryCache.delete(key);
+  }
+  for (const [key, item] of searchResponseCache.entries()) {
+    if (!item || item.expiresAt <= now) searchResponseCache.delete(key);
   }
 }
 
@@ -2215,6 +2228,7 @@ async function handleHealth(options = {}) {
     exchangeRate: exchangeRateStatus,
     cache: {
       searches: searchCache.size,
+      searchResponses: searchResponseCache.size,
       bookings: bookingCache.size,
       ancillaries: ancillaryCache.size,
       inflightAncillaries: inflightAncillaries.size,
@@ -2228,6 +2242,7 @@ async function handleHealth(options = {}) {
       'GET /config/exchange-rate',
       'POST /auth/login',
       'POST /flights/search',
+      'POST /flights/search/stream',
       'POST /flights/price',
       'POST /bookings/ancillaries',
       'POST /bookings/hold',
@@ -2332,17 +2347,151 @@ async function handleSearch(body) {
   requireFields(body, ['from', 'to', 'date']);
   const startedAt = Date.now();
   const key = searchCoalesceKey(body);
+  const cached = searchResponseCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+  if (cached) searchResponseCache.delete(key);
+
   const existing = inflightSearch.get(key);
   if (existing) return existing;
 
   const promise = withAutoLogin(async (client) => {
     const result = await searchJourney(commandParams(body), { client });
-    return publicSearchResponse(result, startedAt);
+    const response = publicSearchResponse(result, startedAt);
+    searchResponseCache.set(key, {
+      data: response,
+      expiresAt: Date.now() + SEARCH_RESPONSE_CACHE_TTL_MS,
+    });
+    return response;
   }, body).finally(() => {
     inflightSearch.delete(key);
   });
   inflightSearch.set(key, promise);
   return promise;
+}
+
+async function handleSearchStream(body, req, res) {
+  requireFields(body, ['from', 'to', 'date']);
+
+  const headers = {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+    'Vary': 'Origin',
+  };
+  const origin = resolveCorsOrigin(req);
+  if (origin) headers['Access-Control-Allow-Origin'] = origin;
+  res.writeHead(200, headers);
+
+  let clientClosed = false;
+  req.on('close', () => {
+    clientClosed = true;
+  });
+
+  function writeEvent(data, eventName = '') {
+    if (clientClosed || res.writableEnded || res.destroyed) return false;
+    if (eventName) res.write(`event: ${eventName}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+    return true;
+  }
+
+  function writeError(message) {
+    if (writeEvent({ error: message }, 'error')) res.end();
+  }
+
+  let client;
+  try {
+    client = await withAutoLogin((currentClient) => Promise.resolve(currentClient), body);
+  } catch (error) {
+    writeError(`Login failed: ${error && error.message ? error.message : String(error)}`);
+    return;
+  }
+
+  const params = commandParams(body);
+  let request;
+  let sessionData;
+  let airlines;
+
+  try {
+    request = buildSearchRequest(params);
+    const createSession = await client.createSession(request);
+    sessionData = createSession.data || {};
+    request.sessionID = sessionData.sessionID;
+
+    const normalizedSignIns = (sessionData.listSignIn || [])
+      .map((item) => (typeof item === 'string' ? item : (item && (item.airline || item.airlineCode || item.code || item.value)) || ''))
+      .map((item) => String(item).trim().toUpperCase())
+      .filter(Boolean);
+    const requestedAirline = params.airline ? String(params.airline).trim().toUpperCase() : null;
+    const fallbackAirlines = ['VN', 'VJ', 'QH', 'VU', '9G'];
+    airlines = requestedAirline
+      ? [requestedAirline]
+      : (normalizedSignIns.length ? normalizedSignIns : fallbackAirlines);
+
+    writeEvent({ type: 'session', airlines, sessionId: sessionData.sessionID });
+  } catch (error) {
+    writeError(`Session failed: ${error && error.message ? error.message : String(error)}`);
+    return;
+  }
+
+  let completedCount = 0;
+  await Promise.all(
+    airlines.map(async (airline) => {
+      try {
+        const response = await client.searchFlightByAirline(airline, request);
+        const partialResult = {
+          client,
+          request,
+          createSession: { data: sessionData },
+          sessionData,
+          signIns: airlines,
+          byAirline: { [airline]: [] },
+          errorsByAirline: {},
+          flights: [],
+          returnFlights: [],
+        };
+
+        if (request.journeyType === 'RT') {
+          const { departureFlights, returnFlights: foundReturnFlights } = flightsFromSearchResponseRT(response);
+          partialResult.byAirline[airline] = departureFlights;
+          partialResult.flights = departureFlights;
+          partialResult.returnFlights = foundReturnFlights;
+        } else {
+          const foundFlights = flightsFromSearchResponse(response);
+          partialResult.byAirline[airline] = foundFlights;
+          partialResult.flights = foundFlights;
+        }
+
+        const cached = cacheSearch(partialResult);
+        completedCount += 1;
+        writeEvent({
+          type: 'airline_result',
+          airline,
+          searchId: cached.searchId,
+          results: cached.publicFlights,
+          departureResults: cached.publicFlights,
+          returnResults: cached.publicReturnFlights,
+          pairOptions: cached.publicPairOptions,
+          completedCount,
+          totalCount: airlines.length,
+        });
+      } catch (error) {
+        completedCount += 1;
+        writeEvent({
+          type: 'airline_error',
+          airline,
+          error: error && error.message ? error.message : String(error),
+          completedCount,
+          totalCount: airlines.length,
+        });
+      }
+    })
+  );
+
+  writeEvent({ type: 'done', totalCount: airlines.length, completedCount });
+  if (!res.writableEnded && !res.destroyed) res.end();
 }
 
 async function handlePrice(body) {
@@ -2845,6 +2994,11 @@ async function dispatch(req, res) {
     return;
   }
 
+  if (req.method === 'POST' && pathname === '/flights/search/stream') {
+    await handleSearchStream(body, req, res);
+    return;
+  }
+
   if (req.method === 'POST' && pathname === '/flights/search') {
     sendJson(res, 200, await handleSearch(body));
     return;
@@ -2965,7 +3119,7 @@ if (require.main === module) {
   server.listen(DEFAULT_PORT, () => {
     console.log(`Nam Thanh backend API listening on http://localhost:${DEFAULT_PORT}`);
     console.log(`Auth: ${API_KEY ? 'API key required' : (ALLOW_NO_AUTH ? 'DISABLED (BACKEND_ALLOW_NO_AUTH=true, local dev only)' : 'misconfigured')}`);
-    console.log('Endpoints: /health, /airports, /config/exchange-rate, /auth/login, /flights/search, /flights/lowest-fare, /flights/price, /bookings/ancillaries, /bookings/hold');
+    console.log('Endpoints: /health, /airports, /config/exchange-rate, /auth/login, /flights/search, /flights/search/stream, /flights/lowest-fare, /flights/price, /bookings/ancillaries, /bookings/hold');
 
     // Kick off warm-up so the first real user request doesn't pay login cost.
     warmUpSession().catch((err) => console.error('[warmup] unexpected:', err && err.message));
@@ -2980,6 +3134,7 @@ module.exports = {
   toPublicFlight,
   cacheSearch,
   searchCache,
+  searchResponseCache,
   reconcileHoldPricingByTicketInfo,
   reconcileHoldPricingByPnr,
   enrichHoldResultWithPricing,

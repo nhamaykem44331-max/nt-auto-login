@@ -2,8 +2,42 @@ const crypto = require('crypto');
 const { MuadiApiClient, MuadiApiError } = require('./muadi-client');
 
 const DEFAULT_AIRLINES = ['VN', 'VJ', 'QH', 'VU', '9G'];
+const sessionListCache = new Map();
+const SESSION_LIST_CACHE_TTL_MS = 5 * 60 * 1000;
 const TITLE_SET = new Set(['MR', 'MRS', 'MS', 'MISS', 'MSTR']);
 const PENDING_PNR_STATUSES = new Set(['WAIT', 'LOADING']);
+
+function sessionListCacheKey(request = {}) {
+  return [
+    String(request.originCode || request.from || '').trim().toUpperCase(),
+    String(request.destinationCode || request.to || '').trim().toUpperCase(),
+    String(request.journeyType || (request.returnDateTime ? 'RT' : 'OW')).trim().toUpperCase(),
+  ].join(':');
+}
+
+function getCachedSessionList(key) {
+  const cached = sessionListCache.get(key);
+  if (!cached) return [];
+  if (cached.expiresAt <= Date.now()) {
+    sessionListCache.delete(key);
+    return [];
+  }
+  return [...cached.listSignIn];
+}
+
+function rememberSessionList(key, list) {
+  const normalized = normalizeAirlineList(list);
+  if (!normalized.length) return normalized;
+  sessionListCache.set(key, {
+    listSignIn: normalized,
+    expiresAt: Date.now() + SESSION_LIST_CACHE_TTL_MS,
+  });
+  return normalized;
+}
+
+function clearSessionListCache() {
+  sessionListCache.clear();
+}
 
 function debugTiming(label, startedAt) {
   if (String(process.env.LOG_LEVEL || '').toLowerCase() === 'debug') {
@@ -421,17 +455,25 @@ async function searchJourney(params = {}, options = {}) {
   const client = options.client || new MuadiApiClient(options);
   const request = buildSearchRequest(params);
   const sessionStartedAt = Date.now();
+  const requestedAirline = params.airline ? String(params.airline).trim().toUpperCase() : null;
+  const listCacheKey = sessionListCacheKey(request);
+  const cachedSignIns = requestedAirline ? [] : getCachedSessionList(listCacheKey);
+  if (!requestedAirline && cachedSignIns.length && (!Array.isArray(request.airlines) || !request.airlines.length)) {
+    request.airlines = [...cachedSignIns];
+  }
+
   const createSession = await client.createSession(request);
   debugTiming('createSession', sessionStartedAt);
   const sessionData = createSession.data || {};
   request.sessionID = sessionData.sessionID;
 
-  const normalizedSignIns = normalizeAirlineList(sessionData.listSignIn);
+  const normalizedSignIns = !requestedAirline
+    ? rememberSessionList(listCacheKey, sessionData.listSignIn)
+    : normalizeAirlineList(sessionData.listSignIn);
   const signIns = normalizedSignIns.length
     ? normalizedSignIns
-    : (params.airline ? [String(params.airline).toUpperCase()] : DEFAULT_AIRLINES);
+    : (cachedSignIns.length ? cachedSignIns : (requestedAirline ? [requestedAirline] : DEFAULT_AIRLINES));
 
-  const requestedAirline = params.airline ? String(params.airline).trim().toUpperCase() : null;
   const airlines = requestedAirline ? [requestedAirline] : signIns;
   const byAirline = {};
   const errorsByAirline = {};
@@ -1096,6 +1138,7 @@ module.exports = {
   buildBookRequest,
   buildSearchRequest,
   cheapestFare,
+  clearSessionListCache,
   createBookingWithProtection,
   departTimeOf,
   flightNumberOf,
