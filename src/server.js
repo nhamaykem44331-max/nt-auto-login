@@ -25,6 +25,7 @@ const {
   createBookingWithProtection,
   flightsFromSearchResponse,
   flightsFromSearchResponseRT,
+  hasAnyPnrResponse,
   hasCompletePnrResponse,
   holdFlight,
   isBookingProtectionError,
@@ -472,6 +473,16 @@ function holdPricingLogMeta(holdLogCtx, details = {}) {
     startedAt: holdLogCtx.startedAt,
     ...details,
   };
+}
+
+function isTruthyFlag(value) {
+  if (value === true) return true;
+  const text = String(value || '').trim().toLowerCase();
+  return text === 'true' || text === '1' || text === 'yes';
+}
+
+function isFastHoldRequest(body = {}) {
+  return isTruthyFlag(body.fastHold) || isTruthyFlag(body.skipPricingSync);
 }
 
 async function withAutoLogin(operation, body = {}) {
@@ -1606,6 +1617,23 @@ function hasTicketInfoFastReturn(response) {
   return Number.isFinite(totalAmount) && totalAmount >= 0;
 }
 
+function buildDeferredHoldPricing(result) {
+  const ticketInfo = result && (result.ticketInfo || result.bookingResponse);
+  const pnrCodes = pnrCodesFromTicketInfo(ticketInfo);
+  const snapshot = pricingSnapshotFromTicketInfo(ticketInfo, pnrCodes);
+
+  return {
+    verified: false,
+    source: 'deferred-after-fast-hold',
+    currency: snapshot.currency || 'VND',
+    totalAmount: snapshot.totalAmount,
+    byPnr: snapshot.byPnr || [],
+    unresolvedPnrs: pnrCodes,
+    syncedAt: nowIso(),
+    message: 'Pricing sync was deferred so PNR can be returned faster.',
+  };
+}
+
 function pickPricingRowsByPnr(rows, targetSet) {
   const byPnr = new Map();
   for (const row of rows) {
@@ -1996,6 +2024,17 @@ function buildDryRunPricing(result, summary) {
     syncedAt: nowIso(),
     message: 'Dry-run mode: total is estimated from fare snapshot.',
   };
+}
+
+async function finalizeHoldResultWithPricing(result, body = {}, options = {}) {
+  if (!result?.dryRun && isFastHoldRequest(body)) {
+    return {
+      ...result,
+      pricing: buildDeferredHoldPricing(result),
+    };
+  }
+
+  return enrichHoldResultWithPricing(result, body, options);
 }
 
 async function enrichHoldResultWithPricing(result, body = {}, options = {}) {
@@ -2741,6 +2780,7 @@ async function holdFromCachedSelection(body) {
   const passengers = passengersFromBody(body);
   const passenger = passengers[0];
   const holdId = randomId('hold');
+  const fastHold = isFastHoldRequest(body);
 
   const resultWithPricing = await withAutoLogin(async (client) => {
     const contact = contactFromBody(client, passenger, body);
@@ -2769,15 +2809,20 @@ async function holdFromCachedSelection(body) {
         bookRequest: finalBookRequest,
         dryRun: true,
       };
-      return enrichHoldResultWithPricing(result, body, { client, holdId });
+      return finalizeHoldResultWithPricing(result, body, { client, holdId });
     }
 
     const protectedBooking = await createBookingWithProtection(client, finalBookRequest, { otp: body.otp });
     const bookingResponse = protectedBooking.bookingResponse;
     let ticketInfo = bookingResponse;
-    if (!hasCompletePnrResponse(bookingResponse)) {
+    if (!hasCompletePnrResponse(bookingResponse) && !(fastHold && hasAnyPnrResponse(bookingResponse))) {
       try {
-        ticketInfo = await pollTicketInfoLocal(client, finalBookRequest.sessionID, body.pollAttempts, body.pollDelayMs);
+        ticketInfo = await pollTicketInfoLocal(
+          client,
+          finalBookRequest.sessionID,
+          body.pollAttempts ?? (fastHold ? 1 : undefined),
+          body.pollDelayMs ?? (fastHold ? 0 : undefined)
+        );
       } catch (error) {
         logger.warn('[hold] ticket-info polling failed after create-booking; returning booking response fallback', {
           sessionID: finalBookRequest.sessionID,
@@ -2798,7 +2843,7 @@ async function holdFromCachedSelection(body) {
       ticketInfo,
       dryRun: false,
     };
-    return enrichHoldResultWithPricing(result, body, { client, holdId });
+    return finalizeHoldResultWithPricing(result, body, { client, holdId });
   }, body);
 
   const response = {
@@ -2878,6 +2923,7 @@ async function handleHold(body, req) {
   if (body.searchId) {
     response = await holdFromCachedSelection(body);
   } else {
+    const fastHold = isFastHoldRequest(body);
     requireFields(body, ['from', 'to', 'date']);
     const passengers = passengersFromBody(body);
     const passenger = passengers[0];
@@ -2891,11 +2937,13 @@ async function handleHold(body, req) {
       const result = await holdFlight(params, {
         client,
         dryRun: !!body.dryRun,
-        pollAttempts: body.pollAttempts,
-        pollDelayMs: body.pollDelayMs,
+        fastHold,
+        skipPricingSync: fastHold,
+        pollAttempts: body.pollAttempts ?? (fastHold ? 1 : undefined),
+        pollDelayMs: body.pollDelayMs ?? (fastHold ? 0 : undefined),
         otp: body.otp,
       });
-      return enrichHoldResultWithPricing(result, body, { client, holdId });
+      return finalizeHoldResultWithPricing(result, body, { client, holdId });
     }, body);
     response = normalizeHoldSummary(resultWithPricing, holdId);
     bookingCache.set(holdId, { createdAt: Date.now(), expiresAt: Date.now() + BOOKING_CACHE_TTL_MS, response });

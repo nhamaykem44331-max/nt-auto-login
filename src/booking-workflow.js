@@ -64,6 +64,10 @@ function hasCompletePnrResponse(response) {
   return pnrs.length > 0 && !pnrs.some(isPendingPnr);
 }
 
+function hasAnyPnrResponse(response) {
+  return pnrListFromResponse(response).some((item) => item && (item.pnr || item.message));
+}
+
 function parseMoneyAmount(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const text = String(value || '').trim();
@@ -1039,6 +1043,12 @@ async function pollTicketInfo(client, sessionID, attempts = 10, initialDelayMs =
 
 async function holdFlight(params = {}, options = {}) {
   const client = options.client || new MuadiApiClient(options);
+  const fastHold = !!(
+    options.fastHold ||
+    options.skipPricingSync ||
+    params.fastHold ||
+    params.skipPricingSync
+  );
   const priced = await priceFlight(params, { ...options, client });
   const passengers = Array.isArray(params.passengersObject) && params.passengersObject.length > 0
     ? params.passengersObject
@@ -1080,7 +1090,7 @@ async function holdFlight(params = {}, options = {}) {
   const protectionVerified = protectedBooking.protectionVerified;
 
   let ticketInfo;
-  if (hasCompletePnrResponse(bookingResponse)) {
+  if (hasCompletePnrResponse(bookingResponse) || (fastHold && hasAnyPnrResponse(bookingResponse))) {
     ticketInfo = bookingResponse;
     debugTiming('pollTicketInfo skipped', Date.now());
   } else {
@@ -1089,8 +1099,8 @@ async function holdFlight(params = {}, options = {}) {
       ticketInfo = await pollTicketInfo(
         client,
         finalBookRequest.sessionID,
-        options.pollAttempts || 20,
-        options.pollDelayMs || 800
+        options.pollAttempts ?? (fastHold ? 1 : 20),
+        options.pollDelayMs ?? (fastHold ? 0 : 800)
       );
     } catch (error) {
       ticketInfo = bookingResponse;
@@ -1142,6 +1152,7 @@ module.exports = {
   createBookingWithProtection,
   departTimeOf,
   flightNumberOf,
+  hasAnyPnrResponse,
   flightsFromSearchResponse,
   flightsFromSearchResponseRT,
   formatMoney,
