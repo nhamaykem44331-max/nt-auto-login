@@ -433,8 +433,24 @@ class MuadiApiClient {
     return value;
   }
 
-  createSession(body) {
-    return this.post('booking/create-session', body, { version: '2', safeToRetry: true });
+  async createSession(body) {
+    // Muadi trả 403 khi tạo session dồn dập (nhiều search đồng thời / bấm tìm liên tục).
+    // post() đã retry 429/503/5xx; bổ sung retry có backoff cho 403. KHÔNG serialize toàn cục
+    // để tránh head-of-line blocking (1 create-session chậm làm kẹt mọi search). timeout 20s.
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        return await this.post('booking/create-session', body, { version: '2', safeToRetry: true, timeout: 20000 });
+      } catch (err) {
+        lastErr = err;
+        if (err instanceof MuadiApiError && err.status === 403 && attempt < 3) {
+          await sleep(computeBackoff(attempt));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw lastErr;
   }
 
   searchFlightByAirline(airline, body) {
