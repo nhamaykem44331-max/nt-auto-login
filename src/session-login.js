@@ -1,4 +1,5 @@
-const { chromium } = require('playwright');
+// playwright được nạp lazy trong getBrowser() (chỉ khi cần fallback browser+OCR).
+// Lean image (Phase 2) bỏ playwright khỏi dependencies → module vẫn load bình thường.
 const config = require('./config');
 const { login } = require('./login');
 const { apiLogin } = require('./api-login');
@@ -42,6 +43,16 @@ async function getBrowser(headless) {
     try { await singleton.browser.close(); } catch (_) { /* ignore */ }
     singleton.browser = null;
     singleton.headless = null;
+  }
+
+  let chromium;
+  try {
+    ({ chromium } = require('playwright'));
+  } catch (e) {
+    throw new Error(
+      'Fallback browser+OCR không khả dụng: playwright chưa được cài (lean image). ' +
+      'api-login phải hoạt động. Để bật lại fallback: revert commit lean Dockerfile (quay về image Playwright + ddddocr).'
+    );
   }
 
   singleton.browser = await chromium.launch({

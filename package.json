@@ -1,7 +1,7 @@
 {
   "name": "namthanh-auto-login",
   "version": "1.0.0",
-  "description": "Auto-login to booking.namthanh.vn using Playwright + ddddocr",
+  "description": "Auto-login booking.namthanh.vn via Muadi API (fallback Playwright + ddddocr, optional)",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
@@ -31,7 +31,9 @@
   "dependencies": {
     "axios": "^1.7.2",
     "chalk": "^4.1.2",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.4.5"
+  },
+  "optionalDependencies": {
     "playwright": "^1.45.0"
   },
   "devDependencies": {

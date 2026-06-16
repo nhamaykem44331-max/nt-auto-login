@@ -2226,7 +2226,9 @@ async function handleHealth(options = {}) {
     }
   }
 
-  let ocr = { configured: false, reachable: false, url: config.ddddocr && config.ddddocr.apiUrl };
+  // OCR chỉ "configured" khi DDDDOCR_API_URL được set tường minh. Lean image (Phase 2) bỏ env này
+  // → ocr.configured=false → /health KHÔNG còn phụ thuộc OCR (tránh restart loop khi đã gỡ ddddocr).
+  let ocr = { configured: false, reachable: false, url: process.env.DDDDOCR_API_URL || null };
   if (ocr.url) {
     ocr.configured = true;
     try {
@@ -2247,7 +2249,10 @@ async function handleHealth(options = {}) {
       }
     : { value: null, fallback: EXCHANGE_RATE_FALLBACK };
 
-  const ok = !!session.ok && (!ocr.configured || ocr.reachable) && (!probe || probe.ok);
+  // OCR KHÔNG còn gate health: api-login (đăng nhập chính) không cần OCR; OCR chỉ phục vụ
+  // fallback browser. Trên lean image (không có OCR) /health vẫn phải "ok" nếu session tốt.
+  // (ocr vẫn được report trong body để quan sát.) Lỗi đăng nhập thật sẽ lộ qua session.ok.
+  const ok = !!session.ok && (!probe || probe.ok);
   const sessionMgr = sessionManagerStatus();
 
   return {
