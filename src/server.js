@@ -6,7 +6,7 @@ const path = require('path');
 const { URL } = require('url');
 const crypto = require('crypto');
 const config = require('./config');
-const { runLogin, closeSingletonBrowser } = require('./session-login');
+const { runLogin, closeSingletonBrowser, getLoginStatus } = require('./session-login');
 const { getAirportsList } = require('./airports');
 const {
   MuadiApiClient,
@@ -2264,6 +2264,7 @@ async function handleHealth(options = {}) {
     },
     probe,
     ocr,
+    login: getLoginStatus(),
     exchangeRate: exchangeRateStatus,
     cache: {
       searches: searchCache.size,

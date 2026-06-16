@@ -29,6 +29,9 @@ const {
 
 const LOGIN_URL = `${BASE_URL.replace(/\/$/, '')}/auth/login`;
 const LOGIN_TIMEOUT_MS = Number.parseInt(process.env.API_LOGIN_TIMEOUT_MS || '20000', 10);
+// X-Api-Version cho endpoint login. Các call Muadi khác (search/refresh) đều gửi '2'
+// (xem muadi-client.buildHeaders). Cho phép override qua env nếu gateway đổi phiên bản.
+const LOGIN_API_VERSION = process.env.API_LOGIN_API_VERSION || '2';
 
 // Otp = ô captcha client-side; server chỉ cần non-empty. Random để không gửi giá trị cố định.
 function randomOtp() {
@@ -36,17 +39,48 @@ function randomOtp() {
   return crypto.randomBytes(3).toString('hex').slice(0, 4).toUpperCase();
 }
 
-function buildLoginHeaders() {
+function buildLoginHeaders({ withVersion = true } = {}) {
   const tsp = Math.floor(Date.now() / 1000);
-  return {
+  const headers = {
     tsp: encryptMuadi(tsp.toString()),
     'Client-Type': 'Web',
     'X-Language': 'vi',
     Origin: BOOKING_ORIGIN,
     Referer: `${BOOKING_ORIGIN}/`,
     'Content-Type': 'application/json',
-    // KHÔNG set X-Api-Version: endpoint login dùng handler model-binding mặc định.
   };
+  // Gateway Muadi hiện yêu cầu X-Api-Version ở endpoint login (giống các endpoint khác);
+  // trước đây bỏ header này vẫn chạy. Mặc định gửi, có thể thử lại không gửi để self-heal.
+  if (withVersion) headers['X-Api-Version'] = String(LOGIN_API_VERSION);
+  return headers;
+}
+
+// ASP.NET ValidationProblemDetails: { title, errors: { Field: [msg, ...] } }.
+// Gộp errors thành chuỗi để log rõ field nào server từ chối (trước đây bị bỏ đi).
+function describeLoginError(data, status) {
+  if (!data || typeof data !== 'object') {
+    return typeof data === 'string' && data ? 'encrypted/empty error body' : `HTTP ${status}`;
+  }
+  const parts = [];
+  if (data.errors && typeof data.errors === 'object') {
+    for (const [field, msgs] of Object.entries(data.errors)) {
+      parts.push(`${field}: ${Array.isArray(msgs) ? msgs.join('; ') : String(msgs)}`);
+    }
+  }
+  const base = data.message || data.title || data.error || `HTTP ${status}`;
+  return parts.length ? `${base} [${parts.join(' | ')}]` : base;
+}
+
+function isLoginSuccess(res) {
+  return res.status === 200 && res.data && typeof res.data === 'object' && !!res.data.accessToken;
+}
+
+async function postLogin(body, headerOpts) {
+  return axios.post(
+    LOGIN_URL,
+    { encrypted: encryptMuadi(JSON.stringify(body)) },
+    { headers: buildLoginHeaders(headerOpts), validateStatus: () => true, timeout: LOGIN_TIMEOUT_MS }
+  );
 }
 
 function entries(map) {
@@ -97,21 +131,28 @@ async function apiLogin(options = {}) {
   }
 
   const body = { UserName: username, Password: password, AgentCode: agentCode, Otp: randomOtp() };
-  const res = await axios.post(
-    LOGIN_URL,
-    { encrypted: encryptMuadi(JSON.stringify(body)) },
-    { headers: buildLoginHeaders(), validateStatus: () => true, timeout: LOGIN_TIMEOUT_MS }
-  );
+
+  // Thử kèm X-Api-Version (đồng bộ với search/refresh). Nếu vẫn lỗi, thử lại KHÔNG kèm header
+  // (hành vi cũ) — self-heal cả hai chiều khi gateway đổi contract. Login thưa nên 2 request OK.
+  let res = await postLogin(body, { withVersion: true });
+  if (!isLoginSuccess(res)) {
+    const primaryStatus = res.status;
+    const primaryDetail = describeLoginError(res.data, res.status);
+    const retry = await postLogin(body, { withVersion: false });
+    if (isLoginSuccess(retry)) {
+      res = retry;
+    } else {
+      const retryDetail = describeLoginError(retry.data, retry.status);
+      const err = new Error(
+        `apiLogin thất bại (${username}): [X-Api-Version=${LOGIN_API_VERSION}] ${primaryDetail} | [no-version] ${retryDetail}`
+      );
+      err.status = primaryStatus;
+      err.data = res.data;
+      throw err;
+    }
+  }
 
   const data = res.data;
-  if (res.status !== 200 || !data || typeof data !== 'object' || !data.accessToken) {
-    const msg = (data && (data.message || data.title || data.error))
-      || (typeof data === 'string' ? 'encrypted/empty error body' : `HTTP ${res.status}`);
-    const err = new Error(`apiLogin thất bại (${username}): ${msg}`);
-    err.status = res.status;
-    err.data = data;
-    throw err;
-  }
 
   // Đồng bộ lệch giờ server (giống muadi-client) để tsp hợp lệ ngay từ request đầu.
   const serverTime = res.headers && (res.headers.time || res.headers.Time);
