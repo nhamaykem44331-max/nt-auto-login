@@ -32,6 +32,9 @@ const LOGIN_TIMEOUT_MS = Number.parseInt(process.env.API_LOGIN_TIMEOUT_MS || '20
 // X-Api-Version cho endpoint login. Các call Muadi khác (search/refresh) đều gửi '2'
 // (xem muadi-client.buildHeaders). Cho phép override qua env nếu gateway đổi phiên bản.
 const LOGIN_API_VERSION = process.env.API_LOGIN_API_VERSION || '2';
+// Endpoint login nay yêu cầu field `Channel` (giống refresh-token gửi channel='Web').
+// Thiếu field này → server trả "The Channel field is required." (validation error).
+const LOGIN_CHANNEL = process.env.API_LOGIN_CHANNEL || 'Web';
 
 // Otp = ô captcha client-side; server chỉ cần non-empty. Random để không gửi giá trị cố định.
 function randomOtp() {
@@ -39,7 +42,7 @@ function randomOtp() {
   return crypto.randomBytes(3).toString('hex').slice(0, 4).toUpperCase();
 }
 
-function buildLoginHeaders({ withVersion = true } = {}) {
+function buildLoginHeaders({ withVersion = false } = {}) {
   const tsp = Math.floor(Date.now() / 1000);
   const headers = {
     tsp: encryptMuadi(tsp.toString()),
@@ -49,8 +52,8 @@ function buildLoginHeaders({ withVersion = true } = {}) {
     Referer: `${BOOKING_ORIGIN}/`,
     'Content-Type': 'application/json',
   };
-  // Gateway Muadi hiện yêu cầu X-Api-Version ở endpoint login (giống các endpoint khác);
-  // trước đây bỏ header này vẫn chạy. Mặc định gửi, có thể thử lại không gửi để self-heal.
+  // Endpoint login KHÔNG dùng X-Api-Version (model-binding mặc định) — đây là path đúng.
+  // Chỉ gửi khi self-heal thử lại, phòng trường hợp gateway đổi sang yêu cầu version.
   if (withVersion) headers['X-Api-Version'] = String(LOGIN_API_VERSION);
   return headers;
 }
@@ -130,21 +133,27 @@ async function apiLogin(options = {}) {
     throw new Error('apiLogin: thiếu username/password/agencyCode.');
   }
 
-  const body = { UserName: username, Password: password, AgentCode: agentCode, Otp: randomOtp() };
+  const body = {
+    UserName: username,
+    Password: password,
+    AgentCode: agentCode,
+    Channel: LOGIN_CHANNEL,
+    Otp: randomOtp(),
+  };
 
-  // Thử kèm X-Api-Version (đồng bộ với search/refresh). Nếu vẫn lỗi, thử lại KHÔNG kèm header
-  // (hành vi cũ) — self-heal cả hai chiều khi gateway đổi contract. Login thưa nên 2 request OK.
-  let res = await postLogin(body, { withVersion: true });
+  // Path chuẩn: KHÔNG X-Api-Version (model-binding mặc định). Nếu vẫn lỗi, thử lại KÈM
+  // X-Api-Version để self-heal khi gateway đổi contract. Login thưa nên 2 request là chấp nhận được.
+  let res = await postLogin(body, { withVersion: false });
   if (!isLoginSuccess(res)) {
     const primaryStatus = res.status;
     const primaryDetail = describeLoginError(res.data, res.status);
-    const retry = await postLogin(body, { withVersion: false });
+    const retry = await postLogin(body, { withVersion: true });
     if (isLoginSuccess(retry)) {
       res = retry;
     } else {
       const retryDetail = describeLoginError(retry.data, retry.status);
       const err = new Error(
-        `apiLogin thất bại (${username}): [X-Api-Version=${LOGIN_API_VERSION}] ${primaryDetail} | [no-version] ${retryDetail}`
+        `apiLogin thất bại (${username}): [no-version] ${primaryDetail} | [X-Api-Version=${LOGIN_API_VERSION}] ${retryDetail}`
       );
       err.status = primaryStatus;
       err.data = res.data;
