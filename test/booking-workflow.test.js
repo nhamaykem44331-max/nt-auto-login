@@ -323,6 +323,16 @@ describe('buildBookRequest', () => {
     expect(req.adt).toBe(1);
   });
 
+  it('đảo Họ/Tên khi gửi Muadi: listPax.firstName = Họ, lastName = Tên', () => {
+    const req = buildBookRequest({ request, flight: sampleFlight, fare, passenger });
+    // Nội bộ lưu chuẩn quốc tế: lastName='VU' (Họ), firstName='DUC ANH' (Tên).
+    // Muadi đọc firstName như HỌ → phải đảo, nếu không vé in ngược "DUC ANH/VU".
+    expect(req.listPax[0].firstName).toBe('VU');
+    expect(req.listPax[0].lastName).toBe('DUC ANH');
+    expect(req.listPax[0].name).toBe('VU DUC ANH');
+    expect(req.listPax[0].fullName).toBe('VU DUC ANH');
+  });
+
   it('builds correct multi-segment booking request', () => {
     const req = buildBookRequest({ request, flight: sampleMultiSegment, fare: sampleMultiSegment.priceInfo[0], passenger });
     expect(req.listRoutes[0].listRoute).toHaveLength(2);

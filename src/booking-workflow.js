@@ -255,6 +255,24 @@ function mergePassengerAncillaries(passenger = {}) {
   };
 }
 
+// Muadi/booking gateway dùng quy ước Việt: trong listPax, `firstName` = HỌ (đứng đầu vé),
+// `lastName` = TÊN ĐỆM+TÊN. Nội bộ ta lưu chuẩn quốc tế (lastName=Họ, firstName=Tên) nên
+// PHẢI đảo khi gửi sang Muadi, nếu không vé in ngược kiểu "TÊN/HỌ". Đã xác minh trên PNR
+// thật: cả VJ lẫn QH đều đảo y hệt → lỗi đồng nhất ở tầng gateway, sửa 1 chỗ cho mọi hãng.
+function toMuadiPaxName(pax = {}) {
+  const surname = String(pax.lastName || '').trim();   // Họ (nội bộ nằm ở lastName)
+  const given = String(pax.firstName || '').trim();    // Tên đệm + tên (nội bộ ở firstName)
+  if (!surname || !given) return pax;                  // thiếu dữ liệu → giữ nguyên, không đảo
+  const fullName = `${surname} ${given}`.replace(/\s+/g, ' ').trim();
+  return {
+    ...pax,
+    firstName: surname,   // Muadi đọc firstName như HỌ
+    lastName: given,      // Muadi đọc lastName như TÊN
+    fullName,
+    name: fullName,
+  };
+}
+
 function normalizePassport(value) {
   if (!value || typeof value !== 'object') return undefined;
   const passport = {
@@ -703,7 +721,9 @@ function normalizePassengerList(passengers, passenger) {
 
 function buildBookRequest({ client, request, flight, fare, passenger, passengers, contact, isExportNow = false, returnFlight, returnFare }) {
   const currencyCode = fare.currencyCode || request.currencyCode || 'VND';
-  const listPax = normalizePassengerList(passengers, passenger).map((item) => mergePassengerAncillaries(item));
+  const listPax = normalizePassengerList(passengers, passenger)
+    .map((item) => mergePassengerAncillaries(item))
+    .map((item) => toMuadiPaxName(item));
   const leadPassenger = listPax[0];
 
   const outboundEntry = buildRouteEntry({
