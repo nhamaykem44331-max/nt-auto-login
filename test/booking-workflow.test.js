@@ -490,6 +490,18 @@ describe('hold → Muadi payload: field mapping (e2e gửi sang Muadi)', () => {
     });
   });
 
+  it('customerInfo fallback (không có contact.fullName) ghép "Họ Tên" đúng thứ tự', () => {
+    const contact = contactFromSession(mockClient, { firstName: 'CONG PHONG', lastName: 'NGUYEN' }, {});
+    expect(contact.fullName).toBe('NGUYEN CONG PHONG');
+  });
+
+  it('buildBookRequest fallback customerInfo dùng pax CHƯA đảo → "Họ Tên"', () => {
+    const pax = parsePassengerName('', { lastName: 'NGUYEN', firstName: 'CONG PHONG', title: 'MR' });
+    // KHÔNG truyền contact → fallback contactFromSession(leadPassenger chưa đảo)
+    const req = buildBookRequest({ client: mockClient, request: rtRequest, flight: sampleFlight, fare, passenger: pax });
+    expect(req.customerInfo.fullName).toBe('NGUYEN CONG PHONG');
+  });
+
   it('counts: adt/chd/inf trong payload khớp request', () => {
     const pax = parsePassengerName('', { lastName: 'NGUYEN', firstName: 'CONG PHONG', title: 'MR' });
     const req = buildBookRequest({

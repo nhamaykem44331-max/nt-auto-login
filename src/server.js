@@ -1173,7 +1173,8 @@ function contactFromBody(client, passenger, body = {}) {
   const lastName = String(passenger && passenger.lastName || '').trim();
   return {
     email: contact.email || body.email || user.email || agent.agentEmail || '',
-    fullName: contact.fullName || body.contactName || `${firstName} ${lastName}`.trim(),
+    // Tên liên hệ theo quy ước Việt "Họ Tên" (nội bộ: lastName=Họ, firstName=Tên).
+    fullName: contact.fullName || body.contactName || `${lastName} ${firstName}`.trim(),
     phoneNumber: contact.phone || body.phone || user.dienThoai || agent.telephone || '',
     address: contact.address || body.address || '',
     extraInfo: contact.extraInfo || body.extraInfo || '',

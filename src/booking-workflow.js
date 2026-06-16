@@ -655,7 +655,8 @@ function contactFromSession(client, passenger, options = {}) {
   const lastName = String(passenger && passenger.lastName || '').trim();
   return {
     email: options.email || user.email || agent.agentEmail || '',
-    fullName: options.contactName || `${firstName} ${lastName}`.trim(),
+    // Tên liên hệ theo quy ước Việt "Họ Tên" (nội bộ: lastName=Họ, firstName=Tên).
+    fullName: options.contactName || `${lastName} ${firstName}`.trim(),
     phoneNumber: options.phone || user.dienThoai || agent.telephone || '',
     address: options.address || '',
     extraInfo: options.extraInfo || '',
@@ -721,10 +722,12 @@ function normalizePassengerList(passengers, passenger) {
 
 function buildBookRequest({ client, request, flight, fare, passenger, passengers, contact, isExportNow = false, returnFlight, returnFare }) {
   const currencyCode = fare.currencyCode || request.currencyCode || 'VND';
-  const listPax = normalizePassengerList(passengers, passenger)
-    .map((item) => mergePassengerAncillaries(item))
-    .map((item) => toMuadiPaxName(item));
-  const leadPassenger = listPax[0];
+  const normalizedPax = normalizePassengerList(passengers, passenger)
+    .map((item) => mergePassengerAncillaries(item));
+  const listPax = normalizedPax.map((item) => toMuadiPaxName(item));
+  // leadPassenger giữ quy ước nội bộ (lastName=Họ, firstName=Tên), KHÔNG dùng bản đã đảo,
+  // để contactFromSession fallback ghép tên liên hệ đúng thứ tự "Họ Tên".
+  const leadPassenger = normalizedPax[0];
 
   const outboundEntry = buildRouteEntry({
     flight,
